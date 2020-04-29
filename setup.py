@@ -93,6 +93,12 @@ else:
         "joyent_"
     )
 
+USE_STATIC_REQUIREMENTS_IN_ENV = "USE_STATIC_REQUIREMENTS_IN" in os.environ
+USE_STATIC_REQUIREMENTS = (os.environ.get("USE_STATIC_REQUIREMENTS") or "0") == "1"
+# Are we running pop-build
+if "IS_POP_BUILD" in os.environ and not USE_STATIC_REQUIREMENTS_IN_ENV:
+    USE_STATIC_REQUIREMENTS = True
+
 try:
     # Add the esky bdist target if the module is available
     # may require additional modules depending on platform
@@ -112,14 +118,29 @@ SALT_VERSION_HARDCODED = os.path.join(
 SALT_SYSPATHS_HARDCODED = os.path.join(
     os.path.abspath(SETUP_DIRNAME), "salt", "_syspaths.py"
 )
-SALT_REQS = os.path.join(os.path.abspath(SETUP_DIRNAME), "requirements", "base.txt")
-SALT_CRYPTO_REQS = os.path.join(
-    os.path.abspath(SETUP_DIRNAME), "requirements", "crypto.txt"
-)
-SALT_ZEROMQ_REQS = os.path.join(
-    os.path.abspath(SETUP_DIRNAME), "requirements", "zeromq.txt"
-)
-SALT_OSX_REQS = [
+SALT_BASE_REQUIREMENTS = [
+    os.path.join(os.path.abspath(SETUP_DIRNAME), "requirements", "base.txt"),
+    # pyzmq needs to be installed regardless of the salt transport
+    os.path.join(os.path.abspath(SETUP_DIRNAME), "requirements", "zeromq.txt"),
+    os.path.join(os.path.abspath(SETUP_DIRNAME), "requirements", "crypto.txt"),
+]
+SALT_LINUX_LOCKED_REQS = [
+    # Linux packages defined locked requirements
+    os.path.join(
+        os.path.abspath(SETUP_DIRNAME),
+        "requirements",
+        "static",
+        "pkg",
+        "py{}.{}".format(*sys.version_info),
+        "linux.txt",
+    )
+]
+SALT_OSX_REQS = SALT_BASE_REQUIREMENTS + [
+    os.path.abspath(SETUP_DIRNAME),
+    "requirements",
+    "darwin.txt",
+]
+SALT_OSX_LOCKED_REQS = [
     # OSX packages already defined locked requirements
     os.path.join(
         os.path.abspath(SETUP_DIRNAME),
@@ -130,7 +151,12 @@ SALT_OSX_REQS = [
         "darwin.txt",
     )
 ]
-SALT_WINDOWS_REQS = [
+SALT_WINDOWS_REQS = SALT_BASE_REQUIREMENTS + [
+    os.path.abspath(SETUP_DIRNAME),
+    "requirements",
+    "windows.txt",
+]
+SALT_WINDOWS_LOCKED_REQS = [
     # Windows packages already defined locked requirements
     os.path.join(
         os.path.abspath(SETUP_DIRNAME),
@@ -932,19 +958,40 @@ class SaltDistribution(distutils.dist.Distribution):
     @property
     def _property_install_requires(self):
         install_requires = []
-        if IS_OSX_PLATFORM:
-            for reqfile in SALT_OSX_REQS:
-                install_requires += _parse_requirements_file(reqfile)
+        if USE_STATIC_REQUIREMENTS:
+            if IS_OSX_PLATFORM:
+                for reqfile in SALT_OSX_LOCKED_REQS:
+                    install_requires += _parse_requirements_file(reqfile)
 
-        elif IS_WINDOWS_PLATFORM:
-            for reqfile in SALT_WINDOWS_REQS:
-                install_requires += _parse_requirements_file(reqfile)
-
+            elif IS_WINDOWS_PLATFORM:
+                for reqfile in SALT_WINDOWS_LOCKED_REQS:
+                    install_requires += _parse_requirements_file(reqfile)
+            else:
+                for reqfile in SALT_LINUX_LOCKED_REQS:
+                    install_requires += _parse_requirements_file(reqfile)
+            return install_requires
+        elif USE_STATIC_REQUIREMENTS is False and USE_STATIC_REQUIREMENTS_IN_ENV:
+            # We've been explicitly asked to not use the static requirements
+            if IS_OSX_PLATFORM and USE_STATIC_REQUIREMENTS_IN_ENV:
+                for reqfile in SALT_OSX_REQS:
+                    install_requires += _parse_requirements_file(reqfile)
+            elif IS_WINDOWS_PLATFORM:
+                for reqfile in SALT_WINDOWS_REQS:
+                    install_requires += _parse_requirements_file(reqfile)
+            else:
+                for reqfile in SALT_BASE_REQUIREMENTS:
+                    install_requires += _parse_requirements_file(reqfile)
         else:
-            install_requires += _parse_requirements_file(SALT_REQS)
-            # pyzmq needs to be installed regardless of the salt transport
-            install_requires += _parse_requirements_file(SALT_CRYPTO_REQS)
-            install_requires += _parse_requirements_file(SALT_ZEROMQ_REQS)
+            # This is the old and default behavior
+            if IS_OSX_PLATFORM:
+                for reqfile in SALT_OSX_LOCKED_REQS:
+                    install_requires += _parse_requirements_file(reqfile)
+            elif IS_WINDOWS_PLATFORM:
+                for reqfile in SALT_WINDOWS_LOCKED_REQS:
+                    install_requires += _parse_requirements_file(reqfile)
+            else:
+                for reqfile in SALT_BASE_REQUIREMENTS:
+                    install_requires += _parse_requirements_file(reqfile)
         return install_requires
 
     @property
