@@ -11,46 +11,50 @@ import re
 import salt.utils.path
 import salt.utils.platform
 from salt.modules.virtualenv_mod import KNOWN_BINARY_NAMES
-from tests.support.case import ModuleCase
-from tests.support.helpers import VirtualEnv, slowTest
+from tests.support.helpers import VirtualEnv, slowTest, with_tempdir
 from tests.support.runtests import RUNTIME_VARS
-from tests.support.unit import skipIf
+from tests.support.unit import TestCase, skipIf
 
 
 @skipIf(
     salt.utils.path.which_bin(KNOWN_BINARY_NAMES) is None, "virtualenv not installed"
 )
-class BdistSetupTest(ModuleCase):
+class BdistSetupTest(TestCase):
     """
     Tests for building and installing bdist_wheel packages
     """
 
     @slowTest
-    def test_wheel_build(self):
+    @with_tempdir()
+    def test_wheel_build(self, tempdir):
         """
         test building a bdist_wheel package
         """
         # Let's create the testing virtualenv
         with VirtualEnv() as venv:
-            ret = self.run_function(
-                "cmd.run",
-                [
-                    "{0} setup.py bdist_wheel --dist-dir={1}".format(
-                        venv.venv_python, venv.venv_dir
-                    )
-                ],
+            venv.run(venv.venv_python, "setup.py", "clean", cwd=RUNTIME_VARS.CODE_DIR)
+            venv.run(
+                venv.venv_python,
+                "setup.py",
+                "bdist_wheel",
+                "--dist-dir",
+                tempdir,
                 cwd=RUNTIME_VARS.CODE_DIR,
             )
-
-            for _file in os.listdir(venv.venv_dir):
+            for _file in os.listdir(tempdir):
                 if _file.endswith("whl"):
-                    whl = os.path.join(venv.venv_dir, _file)
+                    whl = os.path.join(tempdir, _file)
                     break
 
-            ret = self.run_function("pip.install", pkgs=whl, bin_env=venv.venv_dir)
-
+            venv.install("--ignore-installed", whl)
             # Let's ensure the version is correct
-            pip_ver = self.run_function("pip.list", bin_env=venv.venv_dir).get("salt")
+            cmd = venv.run(venv.venv_python, "-m", "pip", "freeze")
+            for line in cmd.stdout.splitlines():
+                if line.startswith("salt"):
+                    pip_ver = line.split("=")[-1]
+                    break
+            else:
+                self.fail("Salt was not found installed")
             whl_ver = [
                 x for x in whl.split("/")[-1:][0].split("-") if re.search(r"^\d.\d*", x)
             ][0]
