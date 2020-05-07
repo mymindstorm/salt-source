@@ -373,18 +373,16 @@ class DownloadWindowsDlls(Command):
         if getattr(self.distribution, "salt_download_windows_dlls", None) is None:
             print("This command is not meant to be called on it's own")
             exit(1)
-        import pip
 
-        # pip has moved many things to `_internal` starting with pip 10
-        if LooseVersion(pip.__version__) < LooseVersion("10.0"):
-            # pylint: disable=no-name-in-module
-            from pip.utils.logging import indent_log
+        try:
+            from pip._internal.utils.logging import indent_log
+        except ImportError:
+            from contextlib import contextmanager
 
-            # pylint: enable=no-name-in-module
-        else:
-            from pip._internal.utils.logging import (
-                indent_log,
-            )  # pylint: disable=no-name-in-module
+            @contextmanager
+            def indent_log():
+                yield
+
         platform_bits, _ = platform.architecture()
         url = "https://repo.saltstack.com/windows/dependencies/{bits}/{fname}.dll"
         dest = os.path.join(os.path.dirname(sys.executable), "{fname}.dll")
